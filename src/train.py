@@ -1,8 +1,9 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from src.config import config
-from src.dataset import cifar10_loaders  
+from src.dataset import cifar10_loaders
 from src.model import build_model
 from src.utils import (
     accuracy,
@@ -14,7 +15,11 @@ from src.utils import (
     set_seed
 )
 
+# Set random seed for reproducibility
 set_seed(config.RANDOM_SEED)
+
+# Automatically set device to CUDA if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def train_one_epoch(model, loader, criterion, optimizer, device):
@@ -23,10 +28,9 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     running_acc = 0.0
 
     for images, labels in loader:
-        images = images.to(device)
-        labels = labels.to(device)
+        images, labels = images.to(device), labels.to(device)
 
-        
+        # Apply MixUp or CutMix with probability
         applied_aug = None
         if config.USE_CUTMIX and (torch.rand(1).item() < config.AUG_PROB):
             images, targets_a, targets_b, lam = cutmix_data(
@@ -44,6 +48,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         optimizer.zero_grad()
         outputs = model(images)
 
+        # Compute loss
         if applied_aug is None:
             loss = criterion(outputs, labels)
         else:
@@ -53,11 +58,11 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         optimizer.step()
 
         running_loss += loss.item()
-        
+
+        # Compute accuracy
         if applied_aug is None:
             running_acc += accuracy(outputs, labels)
         else:
-            
             _, pred = torch.max(outputs, 1)
             correct_a = (pred == targets_a).sum().item()
             correct_b = (pred == targets_b).sum().item()
@@ -89,12 +94,15 @@ def evaluate(model, loader, criterion, device):
 
 
 def main():
+    # Load data
     train_loader, test_loader = cifar10_loaders()
 
-    model = build_model()
+    # Build model
+    model = build_model().to(device)
     print(model)
     print(f"\nTrainable Parameters: {count_parameters(model):,}\n")
 
+    # Loss, optimizer, scheduler
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(
         model.parameters(),
@@ -105,12 +113,16 @@ def main():
         optimizer, step_size=config.LR_STEP_SIZE, gamma=config.LR_GAMMA
     )
 
+    # Create checkpoint folder
+    checkpoint_dir = "checkpoints"
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
     best_acc = 0.0
-    device = config.DEVICE
 
     print("[INFO] Starting training...\n")
     print(f"[INFO] MixUp={config.USE_MIXUP}, CutMix={config.USE_CUTMIX}, AUG_PROB={config.AUG_PROB}")
 
+    # Training loop
     for epoch in range(1, config.EPOCHS + 1):
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         test_loss, test_acc = evaluate(model, test_loader, criterion, device)
@@ -121,10 +133,13 @@ def main():
         print(f"  Train Loss: {train_loss:.4f} | Train Acc: {train_acc*100:.2f}%")
         print(f"  Test  Loss: {test_loss:.4f} | Test  Acc: {test_acc*100:.2f}%\n")
 
-       
+        
         if test_acc > best_acc:
             best_acc = test_acc
-            save_checkpoint(model, optimizer, epoch, filename="best_model.pth")
+            save_checkpoint(
+                model, optimizer, epoch,
+                filename=os.path.join(checkpoint_dir, "best_model.pth")
+            )
             print(f"[INFO] New best model saved with accuracy: {best_acc*100:.2f}%\n")
 
     print("[INFO] Training Completed.")

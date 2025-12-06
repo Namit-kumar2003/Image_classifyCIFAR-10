@@ -7,13 +7,16 @@ from src.config import config
 
 
 def save_checkpoint(model, optimizer, epoch, filename="checkpoint.pth"):
-    save_path = os.path.join(config.MODEL_DIR, filename)
+    folder = os.path.dirname(filename)
+    if folder != "":
+        os.makedirs(folder, exist_ok=True)  
     checkpoint = {
-        "epoch": epoch,
         "model_state": model.state_dict(),
         "optimizer_state": optimizer.state_dict(),
+        "epoch": epoch
     }
-    torch.save(checkpoint, save_path)
+    torch.save(checkpoint, filename)
+    save_path = os.path.abspath(filename)
     print(f"[INFO] Checkpoint saved at: {save_path}")
 
 
